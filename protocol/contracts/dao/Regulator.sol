@@ -26,7 +26,7 @@ contract Regulator is Comptroller {
     using SafeMath for uint256;
     using Decimal for Decimal.D256;
 
-    event SupplyIncrease(uint256 indexed epoch, uint256 price, uint256 newRedeemable, uint256 lessDebt, uint256 newBonded);
+    event SupplyIncrease(uint256 indexed epoch, uint256 price, uint256 newRedeemable, uint256 lessDebt, uint256 newBonded, uint256 newBondRedeemable);
     event SupplyDecrease(uint256 indexed epoch, uint256 price, uint256 newDebt);
     event SupplyNeutral(uint256 indexed epoch);
 
@@ -59,8 +59,8 @@ contract Regulator is Comptroller {
     function growSupply(Decimal.D256 memory price) private {
         Decimal.D256 memory delta = limit(price.sub(Decimal.one()).div(Constants.getSupplyChangeDivisor()));
         uint256 newSupply = delta.mul(totalNet()).asUint256();
-        (uint256 newRedeemable, uint256 lessDebt, uint256 newBonded) = increaseSupply(newSupply);
-        emit SupplyIncrease(epoch(), price.value, newRedeemable, lessDebt, newBonded);
+        (uint256 newRedeemable, uint256 lessDebt, uint256 newBonded, uint256 newBondRedeemable) = increaseSupply(newSupply);
+        emit SupplyIncrease(epoch(), price.value, newRedeemable, lessDebt, newBonded, newBondRedeemable);
     }
 
 
@@ -73,13 +73,15 @@ contract Regulator is Comptroller {
 
     function oracleCapture() private returns (Decimal.D256 memory) {
         (Decimal.D256 memory price, bool valid) = oracle().capture();
-
+        
         if (bootstrappingAt(epoch().sub(1))) {
             return Constants.getBootstrappingPrice();
         }
         if (!valid) {
             return Decimal.one();
         }
+
+        setEpochPrice(epoch(), price);
 
         return price;
     }

@@ -56,6 +56,7 @@ contract Epoch {
         uint256 bonded;
         Coupons coupons;
     }
+
 }
 
 contract Candidate {

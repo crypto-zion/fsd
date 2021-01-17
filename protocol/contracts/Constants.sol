@@ -24,11 +24,11 @@ library Constants {
     uint256 private constant CHAIN_ID = 1; // Mainnet
 
     /* Bootstrapping */
-    uint256 private constant BOOTSTRAPPING_PERIOD = 168;
+    uint256 private constant BOOTSTRAPPING_PERIOD = 2;
     uint256 private constant BOOTSTRAPPING_PRICE = 220e16; // 2.2 USDC (targeting 5% inflation)
 
     /* Oracle */
-    address private constant USDC = address(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
+    address private constant USDC = address(0x28709Af9376191653bA671d3C74682cA6F46a4Fd);
 
     uint256 private constant ORACLE_RESERVE_MINIMUM = 1e10; // 10,000 USDC
 
@@ -45,7 +45,7 @@ library Constants {
     uint256 private constant EPOCH_OFFSET = 0;
     uint256 private constant EPOCH_START = 1609905600;
     
-    uint256 private constant EPOCH_PERIOD = 3600; // 60 min
+    uint256 private constant EPOCH_PERIOD = 120; // 2 min
 
     /* Governance */
     uint256 private constant GOVERNANCE_PERIOD = 24; // 24 epochs
@@ -78,6 +78,15 @@ library Constants {
     uint256 private constant SUPPLY_CHANGE_LIMIT = 10e16; // 10%
 
     uint256 private constant ORACLE_POOL_RATIO = 50; // 50%
+
+    // bonds logic
+    uint256 private constant BOND_REDEEMABLE_TWAP_CAP = 120e16; // 1.2USDC
+    
+    uint256 private constant BOND_REDEEMABLE_TWAP_FLOOR = 1e18; // 1USDC
+
+    //bond pool : coupon pool = 4:1
+    uint256 private constant BOND_POOL_RATIO = 80; // 80%
+
 
     /**
      * Getters
@@ -172,5 +181,18 @@ library Constants {
 
     function getChainId() internal pure returns (uint256) {
         return CHAIN_ID;
+    }
+
+    // bonds logic
+    function getBondRedeemableTWAPCap() internal pure returns (Decimal.D256 memory) {
+        return Decimal.D256({ value: BOND_REDEEMABLE_TWAP_CAP });
+    }
+
+    function getBondRedeemableTWAPFloor() internal pure returns (Decimal.D256 memory) {
+        return Decimal.D256({ value: BOND_REDEEMABLE_TWAP_FLOOR });
+    }
+
+    function getBondPoolRatio() internal pure returns (uint256) {
+        return BOND_POOL_RATIO;
     }
 }

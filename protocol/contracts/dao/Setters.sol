@@ -19,6 +19,7 @@ pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "./State.sol";
+import "./StateExtension1.sol";
 import "./Getters.sol";
 
 contract Setters is State, Getters {
@@ -74,6 +75,15 @@ contract Setters is State, Getters {
         _state.balance.redeemable = _state.balance.redeemable.sub(amount, reason);
     }
 
+    // bonds logic
+    function incrementTotalBondRedeemable(uint256 amount) internal {
+        _stateExtension1.balance.bondRedeemable = _stateExtension1.balance.bondRedeemable.add(amount);
+    }
+
+    function decrementTotalBondRedeemable(uint256 amount, string memory reason) internal {
+        _stateExtension1.balance.bondRedeemable = _stateExtension1.balance.bondRedeemable.sub(amount, reason);
+    }
+
     /**
      * Account
      */
@@ -114,6 +124,19 @@ contract Setters is State, Getters {
         _state.balance.coupons = _state.balance.coupons.sub(amount, reason);
     }
 
+    // bonds logic
+    function incrementBalanceOfBonds(address account, uint256 epoch, uint256 amount) internal {
+        _stateExtension1.accounts[account].bonds[epoch] = _stateExtension1.accounts[account].bonds[epoch].add(amount);
+        _stateExtension1.epochs[epoch].bonds.outstanding = _stateExtension1.epochs[epoch].bonds.outstanding.add(amount);
+        _stateExtension1.balance.bonds = _stateExtension1.balance.bonds.add(amount);
+    }
+
+    function decrementBalanceOfBonds(address account, uint256 epoch, uint256 amount, string memory reason) internal {
+        _stateExtension1.accounts[account].bonds[epoch] = _stateExtension1.accounts[account].bonds[epoch].sub(amount, reason);
+        _stateExtension1.epochs[epoch].bonds.outstanding = _stateExtension1.epochs[epoch].bonds.outstanding.sub(amount, reason);
+        _stateExtension1.balance.bonds = _stateExtension1.balance.bonds.sub(amount, reason);
+    }
+
     function unfreeze(address account) internal {
         _state.accounts[account].fluidUntil = epoch().add(Constants.getDAOExitLockupEpochs());
     }
@@ -151,6 +174,11 @@ contract Setters is State, Getters {
         }
         _state.balance.coupons = _state.balance.coupons.sub(outstandingCouponsForEpoch);
         _state.epochs[epoch].coupons.outstanding = 0;
+    }
+
+    // bonds logic
+    function setEpochPrice(uint256 epoch, Decimal.D256 memory price) internal {
+       _stateExtension1.epochs[epoch].price = price;
     }
 
     /**

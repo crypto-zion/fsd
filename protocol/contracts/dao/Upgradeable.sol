@@ -52,6 +52,11 @@ contract Upgradeable is State {
 
         emit Upgraded(newImplementation);
     }
+
+    // test!!!
+    function upgradeToE(address newImplementation) external {
+        upgradeTo(newImplementation);
+    }
     
     /**
      * @dev Sets the implementation address of the proxy.

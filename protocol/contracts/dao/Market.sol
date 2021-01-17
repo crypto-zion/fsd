@@ -27,12 +27,24 @@ contract Market is Comptroller, Curve {
 
     bytes32 private constant FILE = "Market";
 
-    event CouponExpiration(uint256 indexed epoch, uint256 couponsExpired, uint256 lessRedeemable, uint256 lessDebt, uint256 newBonded);
+    event CouponExpiration(uint256 indexed epoch, uint256 couponsExpired, uint256 lessRedeemable, uint256 lessDebt, uint256 newBonded, uint256 newBondRedeemable);
     event CouponPurchase(address indexed account, uint256 indexed epoch, uint256 dollarAmount, uint256 couponAmount);
     event CouponRedemption(address indexed account, uint256 indexed epoch, uint256 couponAmount);
     event CouponBurn(address indexed account, uint256 indexed epoch, uint256 couponAmount);
     event CouponTransfer(address indexed from, address indexed to, uint256 indexed epoch, uint256 value);
     event CouponApproval(address indexed owner, address indexed spender, uint256 value);
+
+    // =================== bonds logic ================
+    event BondPurchase(
+        address indexed account, 
+        uint256 indexed epoch, 
+        uint256 indexed dollarAmount, 
+        uint256 bondAmount, 
+        uint256 premium
+    );
+    event BondRedemption(address indexed account, uint256 indexed epoch, uint256 bondAmount, uint256 redeemablePrice);
+    event BondBurn(address indexed account, uint256 indexed epoch, uint256 bondAmount, uint256 redeemablePrice);
+
 
     function step() internal {
         // Expire prior coupons
@@ -47,7 +59,7 @@ contract Market is Comptroller, Curve {
 
     function expireCouponsForEpoch(uint256 epoch) private {
         uint256 couponsForEpoch = outstandingCoupons(epoch);
-        (uint256 lessRedeemable, uint256 lessDebt, uint256 newBonded) = (0, 0, 0);
+        (uint256 lessRedeemable, uint256 lessDebt, uint256 newBonded, uint256 newBondRedeemable) = (0, 0, 0, 0);
 
         eliminateOutstandingCoupons(epoch);
 
@@ -56,10 +68,10 @@ contract Market is Comptroller, Curve {
         if (totalRedeemable > totalCoupons) {
             lessRedeemable = totalRedeemable.sub(totalCoupons);
             burnRedeemable(lessRedeemable);
-            (, lessDebt, newBonded) = increaseSupply(lessRedeemable);
+            (, lessDebt, newBonded, newBondRedeemable) = increaseSupply(lessRedeemable);
         }
 
-	    emit CouponExpiration(epoch, couponsForEpoch, lessRedeemable, lessDebt, newBonded);
+	    emit CouponExpiration(epoch, couponsForEpoch, lessRedeemable, lessDebt, newBonded, newBondRedeemable);
     }
 
     function couponPremium(uint256 amount) public view returns (uint256) {
@@ -83,6 +95,76 @@ contract Market is Comptroller, Curve {
         return Decimal.D256({value: couponAmount}).mul(couponEpochDecayedPenalty).value;
     }
 
+    //
+    // ==================== bonds logic =======================
+    //
+    function purchaseBonds(uint256 dollarAmount) external returns (uint256) {
+
+        uint256 epoch = epoch();
+
+        Decimal.D256 memory price = epochPrice(epoch);
+        
+        
+        // bonds can only be bought under 1USDC
+        Require.that(
+            price.lessThan(Decimal.one()),
+            FILE,
+            "TWAP not below 1U"
+        );
+
+        Require.that(
+            dollarAmount > 0,
+            FILE,
+            "Must purchase none-zero amount"
+        );
+
+        Decimal.D256 memory bondPremium = getBondPremium(epoch);
+        uint256 bondAmount = bondPremium
+            .add(Decimal.one())
+            .mul(Decimal.D256({ value: dollarAmount }))
+            .value;
+
+        // burn dollar from account
+        dollar().transferFrom(msg.sender, address(this), dollarAmount);
+        dollar().burn(dollarAmount);
+        balanceCheck();
+
+        incrementBalanceOfBonds(msg.sender, epoch, bondAmount);
+
+        emit BondPurchase(msg.sender, epoch, dollarAmount, bondAmount, bondPremium.value);
+
+        return bondAmount;
+    }
+
+    function redeemBonds(uint256 bondEpoch, uint256 bondAmount) external {
+        require(epoch().sub(bondEpoch) >= 1, "Market: Too early to redeem bonds");
+
+        Decimal.D256 memory price = epochPrice(epoch());
+        Decimal.D256 memory redeemablePrice = getRedeemablePrice(bondEpoch);
+
+        // the TWAP price when bonds redeemed must be equal as or greater than the target redeemable price 
+        Require.that(
+            price.greaterThan(redeemablePrice),
+            FILE,
+            "Redemption price not reach"
+        );
+        
+        decrementBalanceOfBonds(msg.sender, bondEpoch, bondAmount, "Market: Insufficient bond balance");
+
+        dollar().transfer(msg.sender, bondAmount);
+        decrementTotalBondRedeemable(bondAmount, "Comptroller: not enough bond redeemable balance");
+        balanceCheck();
+
+        if(bondAmount > 0){
+            emit BondBurn(msg.sender, bondEpoch, bondAmount, redeemablePrice.value);
+        }
+
+        emit BondRedemption(msg.sender, bondEpoch, bondAmount, redeemablePrice.value);
+    }
+
+    //
+    // ============================ coupon logic ==========================
+    //
     function purchaseCoupons(uint256 dollarAmount) external returns (uint256) {
         Require.that(
             dollarAmount > 0,

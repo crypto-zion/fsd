@@ -19,9 +19,10 @@ pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "./State.sol";
+import "./StateExtension1.sol";
 import "../Constants.sol";
 
-contract Getters is State {
+contract Getters is State, StateExtension1 {
     using SafeMath for uint256;
     using Decimal for Decimal.D256;
 
@@ -87,6 +88,14 @@ contract Getters is State {
         return _state.balance.redeemable;
     }
 
+    function totalBonds() public view returns (uint256) {
+        return _stateExtension1.balance.bonds;
+    }
+
+    function totalBondRedeemable() public view returns (uint256) {
+        return _stateExtension1.balance.bondRedeemable;
+    }
+
     function totalCoupons() public view returns (uint256) {
         return _state.balance.coupons;
     }
@@ -116,6 +125,13 @@ contract Getters is State {
             return 0;
         }
         return _state.accounts[account].coupons[epoch];
+    }
+
+    function balanceOfBonds(address account, uint256 epoch) public view returns (uint256) {
+        if (outstandingBonds(epoch) == 0) {
+            return 0;
+        }
+        return _stateExtension1.accounts[account].bonds[epoch];
     }
 
     function statusOf(address account) public view returns (Account.Status) {
@@ -149,6 +165,27 @@ contract Getters is State {
     function epochTime() public view returns (uint256) {
         Constants.EpochStrategy memory current = Constants.getEpochStrategy();
         return epochTimeWithStrategy(current);
+    }
+
+    // bonds logic
+    function epochPrice(uint256 epoch) public view returns (Decimal.D256 memory) {
+        return _stateExtension1.epochs[epoch].price;
+    }
+
+    function getRedeemablePrice(uint256 epoch) public view returns (Decimal.D256 memory) {
+        // RedeemableTWAP = (1 - Burnt TWAP) * (Cap - Floor) + Floor
+       Decimal.D256 memory price = epochPrice(epoch);
+       require(price.lessThan(Decimal.one()) && !price.isZero(), "Redeemable price not available");
+       return Decimal.one()
+            .sub(epochPrice(epoch))
+            .mul(Constants.getBondRedeemableTWAPCap().sub(Constants.getBondRedeemableTWAPFloor()))
+            .add(Constants.getBondRedeemableTWAPFloor());
+    }
+
+    function getBondPremium(uint256 epoch) public view returns (Decimal.D256 memory) {
+        // Premium = RedeemableTWAP ^ 2 - 1
+        Decimal.D256 memory redeemablePrice = getRedeemablePrice(epoch);
+        return redeemablePrice.pow(2).sub(Decimal.one());
     }
 
     function epochTimeWithStrategy(Constants.EpochStrategy memory strategy) private view returns (uint256) {
@@ -185,6 +222,11 @@ contract Getters is State {
 
     function bootstrappingAt(uint256 epoch) public view returns (bool) {
         return epoch <= Constants.getBootstrappingPeriod();
+    }
+
+    // bonds logic
+    function outstandingBonds(uint256 epoch) public view returns (uint256) {
+        return _stateExtension1.epochs[epoch].bonds.outstanding;
     }
 
     /**

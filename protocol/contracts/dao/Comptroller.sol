@@ -71,49 +71,62 @@ contract Comptroller is Setters {
         balanceCheck();
     }
 
-    function increaseSupply(uint256 newSupply) internal returns (uint256, uint256, uint256) {
-        (uint256 newRedeemable, uint256 lessDebt, uint256 poolReward) = (0, 0, 0);
+    function increaseSupply(uint256 newSupply) internal returns (uint256, uint256, uint256, uint256) {
+        (uint256 newCouponRedeemable, uint256 lessDebt, uint256 poolReward, uint256 newBondRedeemable) = (0, 0, 0, 0);
 
-        // 1. True up redeemable pool
-        uint256 totalRedeemable = totalRedeemable();
-        uint256 totalCoupons = totalCoupons();
-        if (totalRedeemable < totalCoupons) {
+        //1. Pay out to Pool
+        poolReward = newSupply.mul(Constants.getOraclePoolRatio()).div(100);
+        mintToPool(poolReward);
 
-            // Get new redeemable coupons
-            newRedeemable = totalCoupons.sub(totalRedeemable);
-            // Pad with Pool's potential cut
-            newRedeemable = newRedeemable.mul(100).div(SafeMath.sub(100, Constants.getOraclePoolRatio()));
-            // Cap at newSupply
-            newRedeemable = newRedeemable > newSupply ? newSupply : newRedeemable;
-            // Determine Pool's final cut
-            poolReward = newRedeemable.mul(Constants.getOraclePoolRatio()).div(100);
-            // Determine Redeemable's final cut
-            newRedeemable = newRedeemable.sub(poolReward);
+        newSupply = newSupply > poolReward ? newSupply.sub(poolReward) : 0;
+ 
 
-            mintToPool(poolReward);
-            mintToRedeemable(newRedeemable);
+        //2. Pay out to Bond & Coupon
+        if (totalBondRedeemable() < totalBonds() || totalRedeemable() < totalCoupons()){
+            newBondRedeemable = totalBondRedeemable() < totalBonds() ? totalBonds().sub(totalBondRedeemable()) : 0;    
+            newCouponRedeemable = totalRedeemable() < totalCoupons() ? totalCoupons().sub(totalRedeemable()) : 0;
+            
+            uint256 bondSupply = newSupply.mul(Constants.getBondPoolRatio()).div(100);                      //bondSupply = newSupply * BOND_POOL_SHARE%
+            uint256 couponSupply = newSupply.mul(SafeMath.sub(100,Constants.getBondPoolRatio())).div(100);  //couponSupply = newSupply * (1-BOND_POOL_SHARE%)
 
-            newSupply = newSupply.sub(poolReward);
-            newSupply = newSupply.sub(newRedeemable);
+            // If Bond supply is not enough, redeem coupon first, and all remaining supply go to bond
+            if (bondSupply < newBondRedeemable) {
+                if(newCouponRedeemable > 0){
+                    newCouponRedeemable = newCouponRedeemable > couponSupply ? couponSupply : newCouponRedeemable;
+                    mintToRedeemable(newCouponRedeemable);
+                    newSupply = newSupply.sub(newCouponRedeemable);
+                }
+
+                if(newBondRedeemable > 0){        
+                    newBondRedeemable = newBondRedeemable > newSupply ? newSupply : newBondRedeemable;          // all remaining supply to bond
+                    mintToBondRedeemable(newBondRedeemable);
+                    newSupply = newSupply.sub(newBondRedeemable);
+                }
+            // Otherwiase, redeem bond first, and all remaining supply go to coupon
+            } else {
+                if(newBondRedeemable > 0){        
+                    newBondRedeemable = newBondRedeemable > bondSupply ? bondSupply : newBondRedeemable;        
+                    mintToBondRedeemable(newBondRedeemable);
+                    newSupply = newSupply.sub(newBondRedeemable);
+                }
+
+                if(newCouponRedeemable > 0){
+                    newCouponRedeemable = newCouponRedeemable > newSupply ? newSupply : newCouponRedeemable;    // all remaining supply to coupon
+                    mintToRedeemable(newCouponRedeemable);
+                    newSupply = newSupply.sub(newCouponRedeemable);
+                }
+            }
         }
-        // 2. Eliminate debt
-        uint256 totalDebt = totalDebt();
-        if (newSupply > 0 && totalDebt > 0) {
-            lessDebt = totalDebt > newSupply ? newSupply : totalDebt;
-            decreaseDebt(lessDebt);
 
-            newSupply = newSupply.sub(lessDebt);
-        }
-
-        // 3. Payout to bonded
+        //4. Payout to Dao
         if (totalBonded() == 0) {
             newSupply = 0;
         }
         if (newSupply > 0) {
-            mintToBonded(newSupply);
+            mintToDAO(newSupply);
         }
 
-        return (newRedeemable, lessDebt, newSupply.add(poolReward));
+        return (newCouponRedeemable, lessDebt, newSupply.add(poolReward), newBondRedeemable);
     }
 
     function resetDebt(Decimal.D256 memory targetDebtRatio) internal {
@@ -126,9 +139,9 @@ contract Comptroller is Setters {
         }
     }
 
-    function balanceCheck() private {
+    function balanceCheck() internal {
         Require.that(
-            dollar().balanceOf(address(this)) >= totalBonded().add(totalStaged()).add(totalRedeemable()),
+            dollar().balanceOf(address(this)) >= totalBonded().add(totalStaged()).add(totalRedeemable()).add(totalBondRedeemable()),
             FILE,
             "Inconsistent balances"
         );
@@ -166,8 +179,13 @@ contract Comptroller is Setters {
     function mintToRedeemable(uint256 amount) private {
         dollar().mint(address(this), amount);
         incrementTotalRedeemable(amount);
-
         balanceCheck();
     }
 
+    // bonds logic
+    function mintToBondRedeemable(uint256 amount) private {
+        dollar().mint(address(this), amount);
+        incrementTotalBondRedeemable(amount);
+        balanceCheck();
+    }
 }
